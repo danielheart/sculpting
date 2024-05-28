@@ -4,20 +4,21 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader'
 
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import * as dat from 'dat.gui'
-let scene,
+import * as dat from 'three/examples/jsm/libs/lil-gui.module.min.js'
+
+let scene = new THREE.Scene(),
    camera,
    width,
    height,
    renderer,
    controls,
-   crown,
    crownOutside,
    circle,
    upperJaw,
    lowerJaw
-let isDragging = false
-let choosedObject
+let isDragging = false,
+   choosedObject
+
 const material = new THREE.MeshPhongMaterial({
    color: 0xece5b8,
    side: THREE.DoubleSide,
@@ -30,6 +31,7 @@ const choosedMaterial = new THREE.MeshPhongMaterial({
    side: THREE.DoubleSide,
    shininess: 30,
    specular: 0x333333,
+   // flatShading: true,
 })
 
 window.addEventListener('load', init)
@@ -42,18 +44,14 @@ function init() {
 }
 
 // 创建Raycaster对象
-var raycaster = new THREE.Raycaster()
-// 创建球体
-var dotGeom = new THREE.SphereGeometry(0.25, 5, 5)
-var dotMat = new THREE.MeshBasicMaterial({ color: 0x16c2a6 })
+let raycaster = new THREE.Raycaster()
 
 // 创建一个鼠标向量
 const mouse = new THREE.Vector2()
-let mode = 'Add'
-let brushSize = 2
-let strength = 0.5
-function onMouseMove(event) {
-   event.preventDefault()
+let mode = 'Smooth',
+   brushSize = 2,
+   strength = 0.5
+function operateCrown(event) {
    choosedObject = crownOutside
 
    // 计算鼠标位置
@@ -97,30 +95,8 @@ function sculpting(clickedNormal, clickedPosition, object) {
    const avgNormal = new THREE.Vector3()
    const avgPosition = new THREE.Vector3()
    let count = 0
-   if (mode === 'Smooth' || mode === 'Flatten') {
-      for (let i = 0; i < positions.length; i += 3) {
-         const vertex = new THREE.Vector3(
-            positions[i],
-            positions[i + 1],
-            positions[i + 2],
-         )
-         const distance = vertex.distanceTo(clickedPosition)
-         const vertexNormal = new THREE.Vector3(
-            normals[i],
-            normals[i + 1],
-            normals[i + 2],
-         ).normalize()
-         if (distance < brushSize && vertexNormal.dot(clickedNormal) > 0.5) {
-            avgPosition.add(vertex)
-            avgNormal.add(vertexNormal)
-            count++
-         }
-      }
-      if (count > 0) {
-         avgPosition.divideScalar(count)
-         avgNormal.divideScalar(count)
-      }
-   }
+   const vertexIndices = []
+   const smoothRadius = brushSize * strength
 
    for (let i = 0; i < positions.length; i += 3) {
       const vertex = new THREE.Vector3(
@@ -128,48 +104,117 @@ function sculpting(clickedNormal, clickedPosition, object) {
          positions[i + 1],
          positions[i + 2],
       )
+
       const distance = vertex.distanceTo(clickedPosition)
       const vertexNormal = new THREE.Vector3(
          normals[i],
          normals[i + 1],
          normals[i + 2],
-      ).normalize()
+      )
+      const radius = mode === 'Smooth' ? brushSize + smoothRadius : brushSize
 
-      if (distance < brushSize && vertexNormal.dot(clickedNormal) > -1) {
+      if (distance < radius) {
+         vertexIndices.push(i)
+         avgPosition.add(vertex)
+         avgNormal.add(vertexNormal)
+         count++
+      }
+   }
+   if (count > 0) {
+      avgPosition.divideScalar(count)
+      avgNormal.normalize()
+   }
+
+   for (let i = 0; i < vertexIndices.length; i++) {
+      const index = vertexIndices[i]
+      const vertex = new THREE.Vector3(
+         positions[index],
+         positions[index + 1],
+         positions[index + 2],
+      )
+      const distance = vertex.distanceTo(clickedPosition)
+
+      if (distance < brushSize) {
          let offset =
-            (Math.exp(-(((distance / brushSize) * 2) ** 2)) / 20) * strength
+               (Math.exp(-(((distance / brushSize) * 2) ** 2)) / 20) * strength,
+            diffrence,
+            projectVector
          switch (mode) {
             case 'Add':
-               positions[i] += clickedNormal.x * offset
-               positions[i + 1] += clickedNormal.y * offset
-               positions[i + 2] += clickedNormal.z * offset
+               positions[index] += clickedNormal.x * offset
+               positions[index + 1] += clickedNormal.y * offset
+               positions[index + 2] += clickedNormal.z * offset
                break
             case 'Remove':
-               positions[i] += -clickedNormal.x * offset
-               positions[i + 1] += -clickedNormal.y * offset
-               positions[i + 2] += -clickedNormal.z * offset
+               positions[index] += -clickedNormal.x * offset
+               positions[index + 1] += -clickedNormal.y * offset
+               positions[index + 2] += -clickedNormal.z * offset
                break
             case 'Smooth':
-               const diffrence = avgPosition.clone().sub(vertex)
-               positions[i] += avgNormal.x * diffrence.x * strength * offset
-               positions[i + 1] += avgNormal.y * diffrence.y * strength * offset
-               positions[i + 2] += avgNormal.z * diffrence.z * strength * offset
+               // 计算邻域顶点的加权平均位置
+               let avgPos = new THREE.Vector3(),
+                  avgNorm = new THREE.Vector3(),
+                  count = 0
+               for (let j = 0; j < vertexIndices.length; j++) {
+                  const nindex = vertexIndices[j]
+                  const nvertex = new THREE.Vector3(
+                     positions[nindex],
+                     positions[nindex + 1],
+                     positions[nindex + 2],
+                  )
+                  const nnormal = new THREE.Vector3(
+                     normals[nindex],
+                     normals[nindex + 1],
+                     normals[nindex + 2],
+                  )
+                  const ndist = nvertex.distanceTo(vertex)
+                  if (ndist < smoothRadius) {
+                     const weight = 1 / (ndist + 1)
+                     avgPos.add(nvertex.multiplyScalar(weight))
+                     avgNorm.add(nnormal)
+                     count += weight
+                  }
+               }
+               if (count > 0) {
+                  diffrence = avgPos.divideScalar(count).sub(vertex)
+                  projectVector = projection(diffrence, avgNorm.normalize())
+                  // console.log(diffrence, projectVector)
+                  // 更新顶点位置
+                  positions[index] += projectVector.x * offset
+                  positions[index + 1] += projectVector.y * offset
+                  positions[index + 2] += projectVector.z * offset
+               }
                break
             case 'Flatten':
-               offset = 2
+               diffrence = avgPosition.clone().sub(vertex)
+               projectVector = projection(diffrence, avgNormal)
+
+               positions[index] += projectVector.x * offset
+               positions[index + 1] += projectVector.y * offset
+               positions[index + 2] += projectVector.z * offset
                break
          }
       }
    }
-
    attributes.position.needsUpdate = true
    object.geometry.computeVertexNormals(true)
+}
+
+function projection(source, target) {
+   // 计算点积
+   const dotAB = source.dot(target)
+   const dotBB = target.dot(target)
+
+   // 计算投影
+   const projection = target.clone().multiplyScalar(dotAB / dotBB)
+
+   return projection
 }
 
 function createScene() {
    width = window.innerWidth
    height = window.innerHeight
-   scene = new THREE.Scene()
+
    const scaleRatio = 80
    // camera
    // camera = new THREE.PerspectiveCamera(30, width / height, 1, 10000)
@@ -337,9 +382,10 @@ function loadModel() {
       // 鼠标移动事件
       document.addEventListener('mousedown', (e) => {
          if (e.button === 0) isDragging = true
+         operateCrown(e)
       })
       document.addEventListener('mouseup', () => (isDragging = false))
-      document.addEventListener('mousemove', onMouseMove)
+      document.addEventListener('mousemove', operateCrown)
    })
 
    // 3. 创建一个圆形区域,用于在鼠标悬停时显示
