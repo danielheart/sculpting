@@ -1,10 +1,20 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
-import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader'
 
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import * as dat from 'three/examples/jsm/libs/lil-gui.module.min.js'
+
+import {
+   computeBoundsTree,
+   disposeBoundsTree,
+   acceleratedRaycast,
+} from 'three-mesh-bvh'
+
+// Add the extension functions
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree
+THREE.Mesh.prototype.raycast = acceleratedRaycast
 
 let scene = new THREE.Scene(),
    camera,
@@ -13,27 +23,33 @@ let scene = new THREE.Scene(),
    renderer,
    controls,
    crownOutside,
+   crownColorMap,
    circle,
    upperJaw,
    lowerJaw
+
 let isDragging = false,
    choosedObject
 
 const material = new THREE.MeshPhongMaterial({
-   color: 0xece5b8,
-   side: THREE.DoubleSide,
-   shininess: 30,
-   specular: 0x333333,
-})
-
-const choosedMaterial = new THREE.MeshPhongMaterial({
-   color: 0xbfd9d5,
-   side: THREE.DoubleSide,
-   shininess: 30,
-   specular: 0x333333,
-   // flatShading: true,
-})
-
+      color: 0xece5b8,
+      side: THREE.DoubleSide,
+      shininess: 30,
+      specular: 0x333333,
+   }),
+   choosedMaterial = new THREE.MeshPhongMaterial({
+      color: 0xbfd9d5,
+      side: THREE.DoubleSide,
+      shininess: 30,
+      specular: 0x333333,
+      // flatShading: true,
+   }),
+   vertexMat = new THREE.MeshPhongMaterial({
+      side: THREE.DoubleSide,
+      vertexColors: true,
+      transparent: true,
+      opacity: 1.0,
+   })
 window.addEventListener('load', init)
 function init() {
    createScene()
@@ -48,9 +64,16 @@ let raycaster = new THREE.Raycaster()
 
 // 创建一个鼠标向量
 const mouse = new THREE.Vector2()
-let mode = 'Smooth',
-   brushSize = 2,
-   strength = 0.5
+
+const params = {
+   mode: 'Add',
+   brushSize: 2,
+   strength: 0.5,
+   showColorMap: false,
+   showUpperJaw: false,
+   showLowerJaw: false,
+}
+
 function operateCrown(event) {
    choosedObject = crownOutside
 
@@ -75,7 +98,10 @@ function operateCrown(event) {
       circle.visible = true
       circle.lookAt(direction.add(clickedNormal))
       if (isDragging) {
+         // const start = performance.now()
          sculpting(clickedNormal, clickedPosition, choosedObject)
+         // const end = performance.now()
+         // console.log(end - start)
       }
    } else {
       circle.visible = false
@@ -96,7 +122,7 @@ function sculpting(clickedNormal, clickedPosition, object) {
    const avgPosition = new THREE.Vector3()
    let count = 0
    const vertexIndices = []
-   const smoothRadius = brushSize * strength
+   const smoothRadius = params.brushSize * params.strength
 
    for (let i = 0; i < positions.length; i += 3) {
       const vertex = new THREE.Vector3(
@@ -111,7 +137,10 @@ function sculpting(clickedNormal, clickedPosition, object) {
          normals[i + 1],
          normals[i + 2],
       )
-      const radius = mode === 'Smooth' ? brushSize + smoothRadius : brushSize
+      const radius =
+         params.mode === 'Smooth'
+            ? params.brushSize + smoothRadius
+            : params.brushSize
 
       if (distance < radius) {
          vertexIndices.push(i)
@@ -134,12 +163,13 @@ function sculpting(clickedNormal, clickedPosition, object) {
       )
       const distance = vertex.distanceTo(clickedPosition)
 
-      if (distance < brushSize) {
+      if (distance < params.brushSize) {
          let offset =
-               (Math.exp(-(((distance / brushSize) * 2) ** 2)) / 20) * strength,
+               (Math.exp(-(((distance / params.brushSize) * 2) ** 2)) / 20) *
+               params.strength,
             diffrence,
             projectVector
-         switch (mode) {
+         switch (params.mode) {
             case 'Add':
                positions[index] += clickedNormal.x * offset
                positions[index + 1] += clickedNormal.y * offset
@@ -185,7 +215,7 @@ function sculpting(clickedNormal, clickedPosition, object) {
                   positions[index + 2] += projectVector.z * offset
                }
                break
-            case 'Flatten':
+            case 'Smooth2':
                diffrence = avgPosition.clone().sub(vertex)
                projectVector = projection(diffrence, avgNormal)
 
@@ -193,11 +223,24 @@ function sculpting(clickedNormal, clickedPosition, object) {
                positions[index + 1] += projectVector.y * offset
                positions[index + 2] += projectVector.z * offset
                break
+            case 'Flatten':
+               diffrence = avgPosition.clone().sub(vertex)
+               projectVector = projection(diffrence, clickedNormal)
+               // if (clickedNormal.dot(diffrence) < 0) {
+               positions[index] += projectVector.x * offset
+               positions[index + 1] += projectVector.y * offset
+               positions[index + 2] += projectVector.z * offset
+               // }
+               break
          }
       }
    }
    attributes.position.needsUpdate = true
    object.geometry.computeVertexNormals(true)
+   if (params.showColorMap && !isGenerating) {
+      isGenerating = true
+      generateColorMap(crownColorMap, upperJaw, vertexIndices)
+   }
 }
 
 function projection(source, target) {
@@ -250,33 +293,28 @@ function createScene() {
 }
 function createGUI() {
    const gui = new dat.GUI()
-   const params = {
-      mode,
-      brushSize,
-      strength,
-      showColorMap: false,
-      showUpperJaw: false,
-      showLowerJaw: false,
-   }
 
-   const modeControl = gui
-      .add(params, 'mode', ['Add', 'Remove', 'Smooth', 'Flatten'])
-      .onChange(() => {
-         mode = params.mode
-      })
+   const modeControl = gui.add(params, 'mode', [
+      'Add',
+      'Remove',
+      'Smooth',
+      'Flatten',
+   ])
+
    const brushSizeControl = gui
       .add(params, 'brushSize', 0.2, 5, 0.01)
       .onChange(() => {
-         brushSize = params.brushSize
-         circle.scale.set(brushSize, brushSize, brushSize)
+         circle.scale.set(params.brushSize, params.brushSize, params.brushSize)
       })
-   const strengthControl = gui
-      .add(params, 'strength', 0.05, 1, 0.01)
-      .onChange(() => {
-         strength = params.strength
-      })
+   const strengthControl = gui.add(params, 'strength', 0.05, 1, 0.01)
+
    gui.add(params, 'showColorMap').onChange(() => {
-      //
+      if (params.showColorMap) {
+         crownColorMap.visible = true
+         generateColorMap(crownColorMap, upperJaw)
+      } else {
+         crownColorMap.visible = false
+      }
    })
    gui.add(params, 'showUpperJaw').onChange(() => {
       upperJaw.visible = params.showUpperJaw
@@ -338,8 +376,10 @@ function loadModel() {
 
       upperJaw = new THREE.Mesh(geometry, material)
       upperJaw.visible = false
+      upperJaw.geometry.computeBoundsTree({
+         maxLeafTris: 1,
+      })
       scene.add(upperJaw)
-      // 鼠标移动事件
    })
    stlLoader.load('/lowerJaw.stl', function (geometry) {
       geometry.deleteAttribute('normal')
@@ -348,8 +388,10 @@ function loadModel() {
 
       lowerJaw = new THREE.Mesh(geometry, material)
       lowerJaw.visible = false
+      lowerJaw.geometry.computeBoundsTree({
+         maxLeafTris: 1,
+      })
       scene.add(lowerJaw)
-      // 鼠标移动事件
    })
    stlLoader.load('/crownEdge.stl', function (geometry) {
       geometry.deleteAttribute('normal')
@@ -358,7 +400,6 @@ function loadModel() {
 
       const mesh = new THREE.Mesh(geometry, choosedMaterial)
       scene.add(mesh)
-      // 鼠标移动事件
    })
    stlLoader.load('/crownInside.stl', function (geometry) {
       geometry.deleteAttribute('normal')
@@ -368,7 +409,6 @@ function loadModel() {
       const mesh = new THREE.Mesh(geometry, choosedMaterial)
 
       scene.add(mesh)
-      // 鼠标移动事件
    })
 
    stlLoader.load('/crownOutside.stl', function (geometry) {
@@ -377,8 +417,18 @@ function loadModel() {
       geometry.computeVertexNormals()
 
       crownOutside = new THREE.Mesh(geometry, choosedMaterial)
+      crownColorMap = new THREE.Mesh(geometry, vertexMat)
 
-      scene.add(crownOutside)
+      crownColorMap.renderOrder = 1
+      crownColorMap.visible = false
+      const num = geometry.attributes.position.array.length
+      const colors = new Array(4 * num).fill(0)
+      crownColorMap.geometry.setAttribute(
+         'color',
+         new THREE.Float32BufferAttribute(colors, 4),
+      )
+      scene.add(crownOutside, crownColorMap)
+
       // 鼠标移动事件
       document.addEventListener('mousedown', (e) => {
          if (e.button === 0) isDragging = true
@@ -400,9 +450,9 @@ function loadModel() {
    })
 
    circle = new THREE.Line(circleGeometry, circleMaterial)
-   circle.scale.set(brushSize, brushSize, brushSize)
+   circle.scale.set(params.brushSize, params.brushSize, params.brushSize)
    circle.position.set(0, 0, 0.5) // 将圆形区域放置在球体表面上方
-   circle.renderOrder = 1
+   circle.renderOrder = 2
    scene.add(circle)
    circle.visible = false // 默认隐藏圆形区域
 }
@@ -428,4 +478,114 @@ function createLights() {
 function animate() {
    renderer.render(scene, camera)
    requestAnimationFrame(animate)
+}
+
+// ******************距离检测部分****************
+// 创建Raycaster对象
+let raycasterFront = new THREE.Raycaster()
+let raycasterBack = new THREE.Raycaster()
+//参数设置
+const raycastDistance = 4 //进行检测的距离范围
+const validDistance =0.1 //正确配准距离范围
+
+let isGenerating = false
+
+function generateColorMap(detectObject, targetObject, vertexIndices) {
+   // 获取A物体所有顶点
+   const colors = detectObject.geometry.attributes.color
+   // const colors = []
+   const positions = detectObject.geometry.attributes.position.array
+   if (!vertexIndices) {
+      vertexIndices = []
+      for (let i = 0; i < positions.length; i += 3) vertexIndices.push(i)
+   }
+
+   // 循环所有顶点
+   for (let i = 0; i < vertexIndices.length; i++) {
+      // 获取当前顶点
+
+      const index = vertexIndices[i]
+      const vertex = new THREE.Vector3(
+         positions[index],
+         positions[index + 1],
+         positions[index + 2],
+      )
+
+      // 将顶点坐标转换为世界坐标
+      vertex.applyMatrix4(detectObject.matrixWorld)
+
+      // 获取顶点法线
+      const normal = new THREE.Vector3()
+      normal.fromArray(detectObject.geometry.attributes.normal.array, index)
+
+      // 创建射线
+      raycasterFront = new THREE.Raycaster(vertex, normal, 0, raycastDistance)
+      raycasterFront.firstHitOnly = true
+
+      // 检测front射线是否与B物体相交
+      const intersects = raycasterFront.intersectObject(targetObject)
+
+      raycasterBack = new THREE.Raycaster(
+         vertex,
+         normal.clone().negate(),
+         0,
+         raycastDistance,
+      )
+      raycasterBack.firstHitOnly = true
+
+      // 检测back射线是否与B物体相交
+      const intersectsBack = raycasterBack.intersectObject(targetObject)
+
+      let isIntersect = intersects.length > 0 || intersectsBack.length > 0
+      let isJoin = false
+      let distance
+      if (isIntersect) {
+         //判断模型是否相交（内、外）
+         if (intersects.length > 0) {
+            const intersectNormal = intersects[0].face.normal
+               .clone()
+               .applyMatrix4(targetObject.matrixWorld)
+            isJoin = normal.dot(intersectNormal) > 0 ? true : isJoin
+         }
+         if (intersectsBack.length > 0) {
+            const intersectNormal = intersectsBack[0].face.normal
+               .clone()
+               .applyMatrix4(targetObject.matrixWorld)
+            isJoin = normal.dot(intersectNormal) < 0 ? true : isJoin
+         }
+         // 进行距离判断
+         distance =
+            intersects.length > 0 && intersectsBack.length > 0
+               ? Math.min(intersects[0].distance, intersectsBack[0].distance)
+               : intersects.length > 0
+               ? intersects[0].distance
+               : intersectsBack[0].distance
+         const id = index / 3
+         if (isJoin) {
+            if (distance < validDistance * 0.4) {
+               const v = distance / (validDistance * 0.4)
+               colors.setXYZW(id, v, 1, 0, 1)
+            } else if (distance < validDistance) {
+               const v = (validDistance - distance) / (validDistance * 0.6)
+               colors.setXYZW(id, 1, v, 0, 1)
+            } else {
+               colors.setXYZW(id, 1, 0, 0, 1)
+            }
+         } else {
+            if (distance < validDistance * 0.4) {
+               const v = distance / (validDistance * 0.4)
+               colors.setXYZW(id, 0, 1, v, 1)
+            } else if (distance < validDistance) {
+               const v = (validDistance - distance) / (validDistance * 0.6)
+               colors.setXYZW(id, 0, v, 1, 1)
+            } else {
+               colors.setXYZW(id, 1, 1, 1, 0)
+            }
+         }
+      }
+   }
+
+   // 更新顶点颜色
+   detectObject.geometry.attributes.color.needsUpdate = true
+   isGenerating = false
 }
