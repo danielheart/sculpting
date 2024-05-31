@@ -3,6 +3,7 @@ import * as THREE from 'three'
 // Assumes you have a THREE.js scene set up with a mesh named 'mesh'
 // Function to apply Laplace smoothing to a mesh
 export function Smooth(mesh, iterations = 1, lambda = 0.5, vertexIndices) {
+   console.log('smoothing')
    const geometry = mesh.geometry
    geometry.computeVertexNormals()
 
@@ -115,5 +116,4 @@ export function EdgeMap(geometry) {
       }
    }
    geometry.edgeMap = Array.from(edgeVertices)
-
 }
