@@ -4,6 +4,8 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import * as dat from 'three/examples/jsm/libs/lil-gui.module.min.js'
+import { Smooth, NeighborMap, EdgeMap } from './tools/Smooth'
+import { ColorMap } from './tools/ColorMap'
 
 import {
    computeBoundsTree,
@@ -29,7 +31,8 @@ let scene = new THREE.Scene(),
    lowerJaw
 
 let isDragging = false,
-   choosedObject
+   choosedObject,
+   isGenerating = false
 
 const material = new THREE.MeshPhongMaterial({
       color: 0xece5b8,
@@ -66,12 +69,23 @@ let raycaster = new THREE.Raycaster()
 const mouse = new THREE.Vector2()
 
 const params = {
-   mode: 'Add',
+   mode: 'Smooth',
    brushSize: 2,
    strength: 0.5,
    showColorMap: false,
    showUpperJaw: false,
    showLowerJaw: false,
+   remesh: () => {
+      // const start = performance.now()
+      Smooth(crownOutside, 10, 0.5)
+      // const end = performance.now()
+      // console.log(end - start)
+
+      if (params.showColorMap && !isGenerating) {
+         crownOutside.geometry.computeVertexNormals(true)
+         ColorMap(crownColorMap, upperJaw)
+      }
+   },
 }
 
 function operateCrown(event) {
@@ -123,7 +137,7 @@ function sculpting(clickedNormal, clickedPosition, object) {
    let count = 0
    const vertexIndices = []
    const smoothRadius = params.brushSize * params.strength
-
+   const edgeMap = object.geometry.edgeMap
    for (let i = 0; i < positions.length; i += 3) {
       const vertex = new THREE.Vector3(
          positions[i],
@@ -137,13 +151,9 @@ function sculpting(clickedNormal, clickedPosition, object) {
          normals[i + 1],
          normals[i + 2],
       )
-      const radius =
-         params.mode === 'Smooth'
-            ? params.brushSize + smoothRadius
-            : params.brushSize
 
-      if (distance < radius) {
-         vertexIndices.push(i)
+      if (distance < params.brushSize / 2) {
+         if (!edgeMap.includes(i / 3)) vertexIndices.push(i)
          avgPosition.add(vertex)
          avgNormal.add(vertexNormal)
          count++
@@ -153,85 +163,45 @@ function sculpting(clickedNormal, clickedPosition, object) {
       avgPosition.divideScalar(count)
       avgNormal.normalize()
    }
+   if (params.mode === 'Smooth') {
+      Smooth(object, 1, params.strength, vertexIndices)
+   } else {
+      for (let i = 0; i < vertexIndices.length; i++) {
+         const index = vertexIndices[i]
+         const vertex = new THREE.Vector3(
+            positions[index],
+            positions[index + 1],
+            positions[index + 2],
+         )
+         const distance = vertex.distanceTo(clickedPosition)
 
-   for (let i = 0; i < vertexIndices.length; i++) {
-      const index = vertexIndices[i]
-      const vertex = new THREE.Vector3(
-         positions[index],
-         positions[index + 1],
-         positions[index + 2],
-      )
-      const distance = vertex.distanceTo(clickedPosition)
-
-      if (distance < params.brushSize) {
-         let offset =
-               (Math.exp(-(((distance / params.brushSize) * 2) ** 2)) / 20) *
-               params.strength,
-            diffrence,
-            projectVector
-         switch (params.mode) {
-            case 'Add':
-               positions[index] += clickedNormal.x * offset
-               positions[index + 1] += clickedNormal.y * offset
-               positions[index + 2] += clickedNormal.z * offset
-               break
-            case 'Remove':
-               positions[index] += -clickedNormal.x * offset
-               positions[index + 1] += -clickedNormal.y * offset
-               positions[index + 2] += -clickedNormal.z * offset
-               break
-            case 'Smooth':
-               // 计算邻域顶点的加权平均位置
-               let avgPos = new THREE.Vector3(),
-                  avgNorm = new THREE.Vector3(),
-                  count = 0
-               for (let j = 0; j < vertexIndices.length; j++) {
-                  const nindex = vertexIndices[j]
-                  const nvertex = new THREE.Vector3(
-                     positions[nindex],
-                     positions[nindex + 1],
-                     positions[nindex + 2],
-                  )
-                  const nnormal = new THREE.Vector3(
-                     normals[nindex],
-                     normals[nindex + 1],
-                     normals[nindex + 2],
-                  )
-                  const ndist = nvertex.distanceTo(vertex)
-                  if (ndist < smoothRadius) {
-                     const weight = 1 / (ndist + 1)
-                     avgPos.add(nvertex.multiplyScalar(weight))
-                     avgNorm.add(nnormal)
-                     count += weight
-                  }
-               }
-               if (count > 0) {
-                  diffrence = avgPos.divideScalar(count).sub(vertex)
-                  projectVector = projection(diffrence, avgNorm.normalize())
-                  // console.log(diffrence, projectVector)
-                  // 更新顶点位置
+         if (distance < params.brushSize) {
+            let offset =
+                  (Math.exp(-(((distance / params.brushSize) * 2) ** 2)) / 20) *
+                  params.strength,
+               diffrence,
+               projectVector
+            switch (params.mode) {
+               case 'Add':
+                  positions[index] += clickedNormal.x * offset
+                  positions[index + 1] += clickedNormal.y * offset
+                  positions[index + 2] += clickedNormal.z * offset
+                  break
+               case 'Remove':
+                  positions[index] += -clickedNormal.x * offset
+                  positions[index + 1] += -clickedNormal.y * offset
+                  positions[index + 2] += -clickedNormal.z * offset
+                  break
+               case 'Flatten':
+                  diffrence = avgPosition.clone().sub(vertex)
+                  projectVector = projection(diffrence, clickedNormal)
+                  // if (clickedNormal.dot(diffrence) < 0) {
                   positions[index] += projectVector.x * offset
                   positions[index + 1] += projectVector.y * offset
                   positions[index + 2] += projectVector.z * offset
-               }
-               break
-            case 'Smooth2':
-               diffrence = avgPosition.clone().sub(vertex)
-               projectVector = projection(diffrence, avgNormal)
-
-               positions[index] += projectVector.x * offset
-               positions[index + 1] += projectVector.y * offset
-               positions[index + 2] += projectVector.z * offset
-               break
-            case 'Flatten':
-               diffrence = avgPosition.clone().sub(vertex)
-               projectVector = projection(diffrence, clickedNormal)
-               // if (clickedNormal.dot(diffrence) < 0) {
-               positions[index] += projectVector.x * offset
-               positions[index + 1] += projectVector.y * offset
-               positions[index + 2] += projectVector.z * offset
-               // }
-               break
+                  // }
+                  break
+            }
          }
       }
    }
@@ -239,7 +209,8 @@ function sculpting(clickedNormal, clickedPosition, object) {
    object.geometry.computeVertexNormals(true)
    if (params.showColorMap && !isGenerating) {
       isGenerating = true
-      generateColorMap(crownColorMap, upperJaw, vertexIndices)
+      ColorMap(crownColorMap, upperJaw, vertexIndices)
+      isGenerating = false
    }
 }
 
@@ -311,7 +282,7 @@ function createGUI() {
    gui.add(params, 'showColorMap').onChange(() => {
       if (params.showColorMap) {
          crownColorMap.visible = true
-         generateColorMap(crownColorMap, upperJaw)
+         ColorMap(crownColorMap, upperJaw)
       } else {
          crownColorMap.visible = false
       }
@@ -322,6 +293,7 @@ function createGUI() {
    gui.add(params, 'showLowerJaw').onChange(() => {
       lowerJaw.visible = params.showLowerJaw
    })
+   gui.add(params, 'remesh').name('remesh')
 
    // 监听键盘和鼠标滚轮事件
    document.addEventListener('keydown', (event) => {
@@ -415,7 +387,8 @@ function loadModel() {
       geometry.deleteAttribute('normal')
       geometry = BufferGeometryUtils.mergeVertices(geometry)
       geometry.computeVertexNormals()
-
+      NeighborMap(geometry)
+      EdgeMap(geometry)
       crownOutside = new THREE.Mesh(geometry, choosedMaterial)
       crownColorMap = new THREE.Mesh(geometry, vertexMat)
 
@@ -478,114 +451,4 @@ function createLights() {
 function animate() {
    renderer.render(scene, camera)
    requestAnimationFrame(animate)
-}
-
-// ******************距离检测部分****************
-// 创建Raycaster对象
-let raycasterFront = new THREE.Raycaster()
-let raycasterBack = new THREE.Raycaster()
-//参数设置
-const raycastDistance = 4 //进行检测的距离范围
-const validDistance =0.1 //正确配准距离范围
-
-let isGenerating = false
-
-function generateColorMap(detectObject, targetObject, vertexIndices) {
-   // 获取A物体所有顶点
-   const colors = detectObject.geometry.attributes.color
-   // const colors = []
-   const positions = detectObject.geometry.attributes.position.array
-   if (!vertexIndices) {
-      vertexIndices = []
-      for (let i = 0; i < positions.length; i += 3) vertexIndices.push(i)
-   }
-
-   // 循环所有顶点
-   for (let i = 0; i < vertexIndices.length; i++) {
-      // 获取当前顶点
-
-      const index = vertexIndices[i]
-      const vertex = new THREE.Vector3(
-         positions[index],
-         positions[index + 1],
-         positions[index + 2],
-      )
-
-      // 将顶点坐标转换为世界坐标
-      vertex.applyMatrix4(detectObject.matrixWorld)
-
-      // 获取顶点法线
-      const normal = new THREE.Vector3()
-      normal.fromArray(detectObject.geometry.attributes.normal.array, index)
-
-      // 创建射线
-      raycasterFront = new THREE.Raycaster(vertex, normal, 0, raycastDistance)
-      raycasterFront.firstHitOnly = true
-
-      // 检测front射线是否与B物体相交
-      const intersects = raycasterFront.intersectObject(targetObject)
-
-      raycasterBack = new THREE.Raycaster(
-         vertex,
-         normal.clone().negate(),
-         0,
-         raycastDistance,
-      )
-      raycasterBack.firstHitOnly = true
-
-      // 检测back射线是否与B物体相交
-      const intersectsBack = raycasterBack.intersectObject(targetObject)
-
-      let isIntersect = intersects.length > 0 || intersectsBack.length > 0
-      let isJoin = false
-      let distance
-      if (isIntersect) {
-         //判断模型是否相交（内、外）
-         if (intersects.length > 0) {
-            const intersectNormal = intersects[0].face.normal
-               .clone()
-               .applyMatrix4(targetObject.matrixWorld)
-            isJoin = normal.dot(intersectNormal) > 0 ? true : isJoin
-         }
-         if (intersectsBack.length > 0) {
-            const intersectNormal = intersectsBack[0].face.normal
-               .clone()
-               .applyMatrix4(targetObject.matrixWorld)
-            isJoin = normal.dot(intersectNormal) < 0 ? true : isJoin
-         }
-         // 进行距离判断
-         distance =
-            intersects.length > 0 && intersectsBack.length > 0
-               ? Math.min(intersects[0].distance, intersectsBack[0].distance)
-               : intersects.length > 0
-               ? intersects[0].distance
-               : intersectsBack[0].distance
-         const id = index / 3
-         if (isJoin) {
-            if (distance < validDistance * 0.4) {
-               const v = distance / (validDistance * 0.4)
-               colors.setXYZW(id, v, 1, 0, 1)
-            } else if (distance < validDistance) {
-               const v = (validDistance - distance) / (validDistance * 0.6)
-               colors.setXYZW(id, 1, v, 0, 1)
-            } else {
-               colors.setXYZW(id, 1, 0, 0, 1)
-            }
-         } else {
-            if (distance < validDistance * 0.4) {
-               const v = distance / (validDistance * 0.4)
-               colors.setXYZW(id, 0, 1, v, 1)
-            } else if (distance < validDistance) {
-               const v = (validDistance - distance) / (validDistance * 0.6)
-               colors.setXYZW(id, 0, v, 1, 1)
-            } else {
-               colors.setXYZW(id, 1, 1, 1, 0)
-            }
-         }
-      }
-   }
-
-   // 更新顶点颜色
-   detectObject.geometry.attributes.color.needsUpdate = true
-   isGenerating = false
 }
