@@ -1,3 +1,6 @@
 {
-   "redirects": [{ "source": "/main", "destination": "/index.html" }]
+   "rewrites": [
+      { "source": "/", "destination": "/sculpt.html" },
+      { "source": "/main", "destination": "/match.html" }
+   ]
 }
