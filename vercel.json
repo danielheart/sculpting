@@ -1,6 +1,6 @@
 {
    "rewrites": [
-      { "source": "/", "destination": "/sculpt.html" },
-      { "source": "/main", "destination": "/match.html" }
+      { "source": "/", "destination": "/index.html" },
+      { "source": "/match", "destination": "/match.html" }
    ]
 }
