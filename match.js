@@ -75,7 +75,7 @@ let raycaster = new THREE.Raycaster()
 let raycasterBack = new THREE.Raycaster()
 const raycastDistance = 10
 const direction = new THREE.Vector3(0, 0, -1)
-
+const normalWeight = 0.5
 let targetObject
 const vertexIndices = []
 function match() {
@@ -110,7 +110,7 @@ function match() {
          const ndirection = normal
             .clone()
             .negate()
-            .multiplyScalar(1)
+            .multiplyScalar(normalWeight)
             .add(direction)
 
          // 创建射线
@@ -149,7 +149,11 @@ function match() {
 
       const ndirection =
          params.target === 'crown'
-            ? normal.clone().negate().multiplyScalar(1).add(direction)
+            ? normal
+                 .clone()
+                 .negate()
+                 .multiplyScalar(normalWeight)
+                 .add(direction)
             : normal
 
       // 创建射线
@@ -165,7 +169,7 @@ function match() {
             vertex,
             ndirection.clone().negate(),
             0,
-            raycastDistance / 3,
+            1,
          )
          raycasterBack.firstHitOnly = true
          // 检测front射线是否与B物体相交
@@ -188,12 +192,15 @@ function match() {
          const intersectPosition = intersects.length
             ? intersects[0].point
             : intersectsBack[0].point
+         const distance = intersects.length
+            ? intersects[0].distance
+            : intersectsBack[0].distance
          const offset = map(
-            intersectPosition.length(),
+            distance,
             mindistance,
             maxdistance,
-            0.1 * strength * strength,
-            strength * strength,
+            0.1 * strength,
+            strength,
          )
 
          const diffrence = intersectPosition.clone().sub(vertex)
@@ -332,6 +339,15 @@ function loadModel() {
       const bbox = new THREE.Box3().setFromObject(crownCap)
       const center = bbox.getCenter(new THREE.Vector3())
       crownCap.position.copy(center.multiplyScalar(-1))
+
+      params.match()
+      for (let i = 0; i < 5; i++) {
+         params.remesh()
+      }
+      params.match()
+      for (let i = 0; i < 1; i++) {
+         params.remesh()
+      }
    })
    // 创建球体几何体
    const sphereGeometry = new THREE.SphereGeometry(10, 64, 64)

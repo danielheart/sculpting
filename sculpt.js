@@ -82,8 +82,10 @@ const params = {
       // console.log(end - start)
 
       if (params.showColorMap && !isGenerating) {
+         isGenerating = true
          crownOutside.geometry.computeVertexNormals(true)
          ColorMap(crownColorMap, upperJaw)
+         isGenerating = false
       }
    },
 }
@@ -175,10 +177,9 @@ function sculpting(clickedNormal, clickedPosition, object) {
          const distance = vertex.distanceTo(clickedPosition)
 
          let offset =
-               (Math.exp(-(((distance / params.brushSize) * 3.5) ** 2)) / 20) *
-               params.strength,
-            diffrence,
-            projectVector
+            (Math.exp(-(((distance / params.brushSize) * 3.5) ** 2)) / 20) *
+            params.strength
+
          switch (params.mode) {
             case 'Add':
                positions[index] += clickedNormal.x * offset
@@ -191,13 +192,13 @@ function sculpting(clickedNormal, clickedPosition, object) {
                positions[index + 2] += -clickedNormal.z * offset
                break
             case 'Flatten':
-               diffrence = avgPosition.clone().sub(vertex)
-               projectVector = projection(diffrence, clickedNormal)
+               const diffrence = avgPosition.clone().sub(vertex)
+               const projectVector = projection(diffrence, avgNormal)
+               offset *= 5
 
                positions[index] += projectVector.x * offset
                positions[index + 1] += projectVector.y * offset
                positions[index + 2] += projectVector.z * offset
-
                break
          }
       }
