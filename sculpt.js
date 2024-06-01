@@ -69,7 +69,7 @@ let raycaster = new THREE.Raycaster()
 const mouse = new THREE.Vector2()
 
 const params = {
-   mode: 'Smooth',
+   mode: 'Add',
    brushSize: 2,
    strength: 0.5,
    showColorMap: false,
@@ -122,8 +122,6 @@ function operateCrown(event) {
    }
 }
 function sculpting(clickedNormal, clickedPosition, object) {
-   // 选中鼠标位置半径brushSize的所有点
-
    //check joint points
    const attributes = object.geometry.attributes
    const positions = attributes.position.array
@@ -136,7 +134,6 @@ function sculpting(clickedNormal, clickedPosition, object) {
    const avgPosition = new THREE.Vector3()
    let count = 0
    const vertexIndices = []
-   const smoothRadius = params.brushSize * params.strength
    const edgeMap = object.geometry.edgeMap
    for (let i = 0; i < positions.length; i += 3) {
       const vertex = new THREE.Vector3(
@@ -151,8 +148,10 @@ function sculpting(clickedNormal, clickedPosition, object) {
          normals[i + 1],
          normals[i + 2],
       )
+      const radius = params.brushSize / 2
+      // params.mode === 'Smooth' ? params.brushSize / 2 : params.brushSize
 
-      if (distance < params.brushSize / 2) {
+      if (distance < radius) {
          if (!edgeMap.includes(i / 3)) vertexIndices.push(i)
          avgPosition.add(vertex)
          avgNormal.add(vertexNormal)
@@ -175,33 +174,31 @@ function sculpting(clickedNormal, clickedPosition, object) {
          )
          const distance = vertex.distanceTo(clickedPosition)
 
-         if (distance < params.brushSize) {
-            let offset =
-                  (Math.exp(-(((distance / params.brushSize) * 2) ** 2)) / 20) *
-                  params.strength,
-               diffrence,
-               projectVector
-            switch (params.mode) {
-               case 'Add':
-                  positions[index] += clickedNormal.x * offset
-                  positions[index + 1] += clickedNormal.y * offset
-                  positions[index + 2] += clickedNormal.z * offset
-                  break
-               case 'Remove':
-                  positions[index] += -clickedNormal.x * offset
-                  positions[index + 1] += -clickedNormal.y * offset
-                  positions[index + 2] += -clickedNormal.z * offset
-                  break
-               case 'Flatten':
-                  diffrence = avgPosition.clone().sub(vertex)
-                  projectVector = projection(diffrence, clickedNormal)
-                  // if (clickedNormal.dot(diffrence) < 0) {
-                  positions[index] += projectVector.x * offset
-                  positions[index + 1] += projectVector.y * offset
-                  positions[index + 2] += projectVector.z * offset
-                  // }
-                  break
-            }
+         let offset =
+               (Math.exp(-(((distance / params.brushSize) * 3.5) ** 2)) / 20) *
+               params.strength,
+            diffrence,
+            projectVector
+         switch (params.mode) {
+            case 'Add':
+               positions[index] += clickedNormal.x * offset
+               positions[index + 1] += clickedNormal.y * offset
+               positions[index + 2] += clickedNormal.z * offset
+               break
+            case 'Remove':
+               positions[index] += -clickedNormal.x * offset
+               positions[index + 1] += -clickedNormal.y * offset
+               positions[index + 2] += -clickedNormal.z * offset
+               break
+            case 'Flatten':
+               diffrence = avgPosition.clone().sub(vertex)
+               projectVector = projection(diffrence, clickedNormal)
+
+               positions[index] += projectVector.x * offset
+               positions[index + 1] += projectVector.y * offset
+               positions[index + 2] += projectVector.z * offset
+
+               break
          }
       }
    }

@@ -53,15 +53,20 @@ let strength = 0.5
 const params = {
    showCrown: true,
    showMatch: true,
-   showSphere: true,
+   showSphere: false,
    wireframe: false,
+   remeshStrength: 0.5,
    strength,
    target: 'sphere',
    remesh: () => {
-      Smooth(plane, 100, 0.5)
+      for (let i = 0; i < 10; i++) {
+         Smooth(plane, 10, params.remeshStrength)
+      }
    },
    remesh2: () => {
-      Smooth(plane, 100, 0.5, vertexIndices)
+      for (let i = 0; i < 10; i++) {
+         Smooth(plane, 10, 0.1, vertexIndices)
+      }
    },
    match,
 }
@@ -81,6 +86,48 @@ function match() {
    let count = 0
    // 循环所有顶点
    const edgeMap = detectObject.geometry.edgeMap
+
+   let mindistance = 100,
+      maxdistance = -100
+   if (params.target === 'crown') {
+      for (let i = 0; i < positions.length / 3; i++) {
+         // 获取当前顶点
+         const index = i * 3
+         const vertex = new THREE.Vector3(
+            positions[index],
+            positions[index + 1],
+            positions[index + 2],
+         )
+
+         // 将顶点坐标转换为世界坐标
+         vertex.applyMatrix4(detectObject.matrixWorld)
+
+         // 获取顶点法线
+
+         const normal = new THREE.Vector3()
+         normal.fromArray(detectObject.geometry.attributes.normal.array, index)
+
+         const ndirection = normal
+            .clone()
+            .negate()
+            .multiplyScalar(1)
+            .add(direction)
+
+         // 创建射线
+         raycaster = new THREE.Raycaster(vertex, ndirection, 0, raycastDistance)
+         raycaster.firstHitOnly = true
+         // 检测front射线是否与B物体相交
+         const intersects = raycaster.intersectObject(targetObject)
+
+         if (intersects.length) {
+            if (intersects[0].distance > maxdistance)
+               maxdistance = intersects[0].distance
+            if (intersects[0].distance < mindistance)
+               mindistance = intersects[0].distance
+         }
+      }
+   }
+   console.log(mindistance, maxdistance)
 
    for (let i = 0; i < positions.length / 3; i++) {
       if (edgeMap.includes(i)) continue
@@ -141,11 +188,18 @@ function match() {
          const intersectPosition = intersects.length
             ? intersects[0].point
             : intersectsBack[0].point
+         const offset = map(
+            intersectPosition.length(),
+            mindistance,
+            maxdistance,
+            0.1 * strength * strength,
+            strength * strength,
+         )
 
          const diffrence = intersectPosition.clone().sub(vertex)
-         positions[index] += diffrence.x * strength
-         positions[index + 1] += diffrence.y * strength
-         positions[index + 2] += diffrence.z * strength
+         positions[index] += diffrence.x * offset
+         positions[index + 1] += diffrence.y * offset
+         positions[index + 2] += diffrence.z * offset
       } else {
          vertexIndices.push(index)
       }
@@ -156,6 +210,13 @@ function match() {
 
    detectObject.geometry.attributes.position.needsUpdate = true
    detectObject.geometry.computeVertexNormals(true)
+}
+function map(value, originalMin, originalMax, targetMin, targetMax) {
+   return (
+      ((value - originalMin) * (targetMax - targetMin)) /
+         (originalMax - originalMin) +
+      targetMin
+   )
 }
 
 function createScene() {
@@ -199,6 +260,7 @@ function createGUI() {
    const gui = new dat.GUI()
 
    gui.add(params, 'remesh').name('remesh')
+   gui.add(params, 'remeshStrength', 0.01, 1, 0.01)
    gui.add(params, 'remesh2').name('remesh2')
    gui.add(params, 'match').name('match')
    gui.add(params, 'strength', 0.01, 1, 0.01).onChange(() => {
@@ -248,6 +310,9 @@ function loadModel() {
       const center = bbox.getCenter(new THREE.Vector3())
       plane.position.copy(center.multiplyScalar(-1))
       plane.position.z += -3
+      for (let i = 0; i < 20; i++) {
+         Smooth(plane, 10, 1)
+      }
    })
 
    stlLoader.load('/crownCap.stl', function (geometry) {
@@ -274,6 +339,7 @@ function loadModel() {
    // 创建球体网格
    sphere = new THREE.Mesh(sphereGeometry, material)
    scene.add(sphere)
+   sphere.visible = params.showSphere
    targetObject = sphere
    sphere.position.z = -3
 }
