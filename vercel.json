@@ -1,8 +1,8 @@
 {
-   "routes": [
-      {
-         "src": "/main.html",
-         "dest": "/main.html"
-      }
-   ]
+   "rewrites": [
+      { "source": "/", "destination": "/index.html" },
+      { "source": "/main", "destination": "/main.html" }
+   ],
+   "cleanUrls": true,
+   "trailingSlash": false
 }
