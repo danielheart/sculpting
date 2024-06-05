@@ -36,7 +36,7 @@ let isDragging = false,
 
 const material = new THREE.MeshPhongMaterial({
       color: 0xece5b8,
-      side: THREE.DoubleSide,
+      // side: THREE.DoubleSide,
       shininess: 30,
       specular: 0x333333,
    }),

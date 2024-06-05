@@ -1,11 +1,10 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
-import { OBJExporter } from 'three/examples/jsm/exporters/OBJExporter'
 
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import * as dat from 'three/examples/jsm/libs/lil-gui.module.min.js'
-import { EdgeMap, Smooth } from './tools/Smooth'
+import { EdgeMap } from './tools/Smooth'
 
 let scene = new THREE.Scene(),
    camera,
@@ -38,45 +37,23 @@ const params = {
    showBase: true,
    wireframe: false,
    strength,
-   smooth: () => {
-      Smooth(brigde, 10, 0.1)
-      brigde.geometry.deleteAttribute('normal')
-   },
    match: () => {
       match(crownCap, crownBase)
    },
-   export: () => exportModel(scene, 'scene.obj'),
-}
-function exportModel(object, filename) {
-   const exporter = new OBJExporter()
-   const objData = exporter.parse(object)
-
-   const link = document.createElement('a')
-   link.style.display = 'none'
-   document.body.appendChild(link)
-
-   const blob = new Blob([objData], { type: 'text/plain' })
-   const url = URL.createObjectURL(blob)
-   link.href = url
-   link.download = filename
-   link.click()
-
-   document.body.removeChild(link)
-   URL.revokeObjectURL(url)
 }
 
 function match(source, target) {
    let edgeMapSource = source.geometry.edgeMap.slice()
    let edgeMapTarget = target.geometry.edgeMap.slice()
 
-   if (edgeMapSource.length > edgeMapTarget.length) {
-      const num = edgeMapSource.length - edgeMapTarget.length
-      edgeMapSource = removeRandomItems(edgeMapSource, num)
-   } else {
-      const num = edgeMapTarget.length - edgeMapSource.length
-      edgeMapTarget = removeRandomItems(edgeMapTarget, num)
-   }
-   console.log(edgeMapSource.length, edgeMapTarget.length)
+   // if (edgeMapSource.length > edgeMapTarget.length) {
+   //    const num = edgeMapSource.length - edgeMapTarget.length
+   //    edgeMapSource = removeRandomItems(edgeMapSource, num)
+   //    console.log(edgeMapSource.length, edgeMapTarget.length)
+   // } else {
+   //    const num = edgeMapTarget.length - edgeMapSource.length
+   //    edgeMapTarget = removeRandomItems(edgeMapTarget, num)
+   // }
 
    const positionsSource = source.geometry.attributes.position.array
    const positionsTarget = target.geometry.attributes.position.array
@@ -84,32 +61,29 @@ function match(source, target) {
    const normalsTarget = target.geometry.attributes.normal.array
 
    //find near map
-   const index = edgeMapSource[0] * 3
-   let closestIndex = -1
-   const vertexSource = new THREE.Vector3(
-      positionsSource[index],
-      positionsSource[index + 1],
-      positionsSource[index + 2],
-   )
-   let closetDistance = 1000
-   for (const [idx, j] of edgeMapTarget.entries()) {
-      const id = j * 3
-      const vertexTarget = new THREE.Vector3(
-         positionsTarget[id],
-         positionsTarget[id + 1],
-         positionsTarget[id + 2],
+   const nearMap = []
+   for (const [idx, i] of edgeMapSource.entries()) {
+      const index = i * 3
+      const vertexSource = new THREE.Vector3(
+         positionsSource[index],
+         positionsSource[index + 1],
+         positionsSource[index + 2],
       )
-      const distance = vertexSource.distanceTo(vertexTarget)
-      if (distance < closetDistance) {
-         closetDistance = distance
-         closestIndex = idx
+      let closetDistance = 1000
+      for (const j of edgeMapTarget) {
+         const id = j * 3
+         const vertexTarget = new THREE.Vector3(
+            positionsTarget[id],
+            positionsTarget[id + 1],
+            positionsTarget[id + 2],
+         )
+         const distance = vertexSource.distanceTo(vertexTarget)
+         if (distance < closetDistance) {
+            closetDistance = distance
+            nearMap[idx] = j
+         }
       }
    }
-   const movedItems = edgeMapTarget.slice(closestIndex)
-   const nearMap = movedItems.concat(edgeMapTarget.slice(0, closestIndex))
-
-   // 此处代码需要优化
-   nearMap.reverse()
 
    //generate vertex cloud
    const positions = []
@@ -145,137 +119,63 @@ function match(source, target) {
       const distance = vertexSource.distanceTo(vertexTarget)
       const numPoints = Math.round(distance / gap)
 
-      // generate upper 0.3
       let A = vertexSource.clone()
-      let t = 0.5
-      let AB = vertexTarget.clone().sub(vertexSource).multiplyScalar(t)
+      const AB = vertexTarget
+         .clone()
+         .sub(vertexSource)
+         .multiplyScalar(1 / numPoints)
 
-      let S = new THREE.Vector3().crossVectors(AB, normalSource)
-      let CS = new THREE.Vector3().crossVectors(S, AB).normalize()
+      const S = new THREE.Vector3().crossVectors(AB, normalSource)
+      const CS = new THREE.Vector3().crossVectors(S, AB).normalize()
 
-      let N = normalSource.clone().lerp(CS, t)
-      // 计算BC的方向向量，通过AB和N的叉积
-      let M = new THREE.Vector3().crossVectors(N, AB)
-      let AC_normal = new THREE.Vector3().crossVectors(N, M)
+      const T = new THREE.Vector3().crossVectors(AB, normalTarget)
+      const CT = new THREE.Vector3().crossVectors(T, AB).normalize()
 
-      let AC = AC_normal.multiplyScalar(getK(AB.clone().negate(), AC_normal))
-      // 计算C点的坐标
-      const C1 = new THREE.Vector3().addVectors(A, AC)
+      positions.push(A.x, A.y, A.z)
+      for (let j = 0; j < numPoints - 1; j++) {
+         let t, N
 
-      //generate lower 0.3
-      t = 0.25
-      A = vertexTarget.clone()
-      AB = vertexSource.clone().sub(vertexTarget).multiplyScalar(t)
+         if (j < Math.floor(numPoints / 2)) {
+            t = j / Math.floor(numPoints / 2)
+            N = normalSource.clone().lerp(CS, t)
+         } else {
+            t =
+               (j - Math.floor(numPoints / 2)) /
+               (numPoints - Math.floor(numPoints / 2))
+            N = CT.clone().lerp(normalTarget, t)
+         }
 
-      S = new THREE.Vector3().crossVectors(AB, normalTarget)
-      CS = new THREE.Vector3().crossVectors(S, AB).normalize()
-
-      N = normalTarget.clone().lerp(CS, t)
-      // 计算BC的方向向量，通过AB和N的叉积
-      M = new THREE.Vector3().crossVectors(N, AB)
-      AC_normal = new THREE.Vector3().crossVectors(N, M)
-
-      AC = AC_normal.multiplyScalar(getK(AB.clone().negate(), AC_normal))
-      // 计算C点的坐标
-      const C2 = new THREE.Vector3().addVectors(A, AC)
-
-      // 创建样条曲线
-      let curve = new THREE.CatmullRomCurve3([
-         vertexSource,
-         C1,
-         // C2,
-         vertexTarget,
-      ])
-
-      // 获取曲线上插值点
-      let points = curve.getPoints(numPoints)
-      positions[idx] = []
-      for (let j = 0; j < points.length; j++) {
-         positions[idx].push(points[j].x, points[j].y, points[j].z)
-      }
-   }
-
-   // console.log(positions)
-   // 在 Three.js 场景中添加中间点
-   // const geometry = new THREE.BufferGeometry()
-   // geometry.setAttribute(
-   //    'position',
-   //    new THREE.BufferAttribute(new Float32Array(positions.flat()), 3),
-   // )
-
-   // const dotMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.2 })
-   // brigde = new THREE.Points(geometry, dotMat)
-   const geometry = generateGeometry(positions)
-
-   brigde = new THREE.Mesh(geometry, material)
-   scene.add(brigde)
-}
-function generateGeometry(positions) {
-   let indexBefore = 0
-   const indices = []
-   for (let i = 0; i < positions.length; i++) {
-      // if (i === 1) break
-      const posA = positions[i]
-      const posB = i === positions.length - 1 ? positions[0] : positions[i + 1]
-      let last = 0
-      const lenA = posA.length
-      const startB = i === positions.length - 1 ? 0 : indexBefore + lenA
-      for (let m = 0; m < lenA; m += 3) {
-         if (m === lenA - 3) break
-         const vertexA = new THREE.Vector3(posA[m], posA[m + 1], posA[m + 2])
-         const vertexC = new THREE.Vector3(
-            posA[m + 3],
-            posA[m + 4],
-            posA[m + 5],
+         // triangle ABC
+         const B = new THREE.Vector3(
+            A.x + (vertexTarget.x - vertexSource.x) / numPoints,
+            A.y + (vertexTarget.y - vertexSource.y) / numPoints,
+            A.z + (vertexTarget.z - vertexSource.z) / numPoints,
          )
-         let closestIndex = -1,
-            closestDistance = 1000
-         for (let n = 0; n < posB.length; n += 3) {
-            const vertexB = new THREE.Vector3(posB[n], posB[n + 1], posB[n + 2])
-            const distance =
-               vertexA.distanceTo(vertexB) + vertexC.distanceTo(vertexB)
-            if (distance < closestDistance) {
-               closestDistance = distance
-               closestIndex = n
-            }
-         }
 
-         const v1 = (indexBefore + m) / 3
-         const v2 = (startB + closestIndex) / 3
-         const v3 = (indexBefore + m + 3) / 3
-         indices.push(v1, v2, v3)
-         let p = closestIndex
-         while (p !== last) {
-            const v0 = (startB + p) / 3
-            const vt = (startB + p - 3) / 3
-            indices.push(v0, vt, v1)
-            p -= 3
-         }
-         last = closestIndex
+         // 计算BC的方向向量，通过AB和N的叉积
+         const M = new THREE.Vector3().crossVectors(N, AB)
+         const AC_normal = new THREE.Vector3().crossVectors(N, M)
+
+         const AC = AC_normal.multiplyScalar(
+            getK(AB.clone().negate(), AC_normal),
+         )
+         // 计算C点的坐标
+         const C = new THREE.Vector3().addVectors(A, AC)
+         positions.push(C.x, C.y, C.z)
+         A = C.clone()
       }
-      if (last !== posB.length - 3) {
-         let p = last
-         while (p !== posB.length - 3) {
-            const v0 = (startB + p) / 3
-            const vt = (startB + p + 3) / 3
-            const v1 = (indexBefore + lenA - 3) / 3
-            indices.push(v0, vt, v1)
-            p += 3
-         }
-      }
-      indexBefore += lenA
+      positions.push(vertexTarget.x, vertexTarget.y, vertexTarget.z)
    }
+   // 在 Three.js 场景中添加中间点
    const geometry = new THREE.BufferGeometry()
    geometry.setAttribute(
       'position',
-      new THREE.BufferAttribute(new Float32Array(positions.flat()), 3),
+      new THREE.BufferAttribute(new Float32Array(positions), 3),
    )
-   // 设置几何体的索引
-   geometry.setIndex(indices)
 
-   // 计算法线
-   // geometry.computeVertexNormals()
-   return geometry
+   const dotMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.2 })
+   brigde = new THREE.Points(geometry, dotMat)
+   scene.add(brigde)
 }
 function getK(c, a0) {
    const cMagnitude = c.length()
@@ -368,8 +268,6 @@ function createGUI() {
          material.wireframe = false
       }
    })
-   gui.add(params, 'smooth').name('smooth')
-   gui.add(params, 'export').name('export')
 }
 function loadModel() {
    //add stl files
