@@ -195,16 +195,6 @@ function match(source, target) {
       }
    }
 
-   // console.log(positions)
-   // 在 Three.js 场景中添加中间点
-   // const geometry = new THREE.BufferGeometry()
-   // geometry.setAttribute(
-   //    'position',
-   //    new THREE.BufferAttribute(new Float32Array(positions.flat()), 3),
-   // )
-
-   // const dotMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.2 })
-   // brigde = new THREE.Points(geometry, dotMat)
    const geometry = generateGeometry(positions)
 
    brigde = new THREE.Mesh(geometry, material)
