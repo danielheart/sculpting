@@ -15,7 +15,9 @@ let scene = new THREE.Scene(),
    controls,
    crownCap,
    crownBase,
-   brigde
+   bridge,
+   normalHelper,
+   crownTop
 
 const material = new THREE.MeshPhongMaterial({
    color: 0xece5b8,
@@ -32,21 +34,121 @@ function init() {
    createGUI()
    animate()
 }
-let strength = 0.5
+let strength = 0.1
+
 const params = {
    showCrown: true,
    showBase: true,
    wireframe: false,
    strength,
    smooth: () => {
-      Smooth(brigde, 10, 0.1)
-      brigde.geometry.deleteAttribute('normal')
+      if (crownTop) {
+         const positions = bridge.geometry.attributes.position.array
+         const vertexIndices = []
+
+         for (let i = 0; i < positions.length; i += 3) {
+            vertexIndices.push(i)
+         }
+         // console.log(vertexIndices)
+         Smooth(crownTop, 10, params.strength, vertexIndices)
+         // normalHelper.geometry = createNormalHelper(crownTop.geometry).geometry
+         // normalHelper.geometry.computeVertexNormals()
+         // normalHelper.geometry.attributes.normal.needsUpdate = true
+         // normalHelper.updateMatrixWorld(true)
+      } else {
+         Smooth(crownCap, 10, params.strength / 2)
+      }
    },
    match: () => {
       match(crownCap, crownBase)
    },
+   showNormal: true,
    export: () => exportModel(scene, 'scene.obj'),
+   merge: () => {
+      if (bridge) mergeCrown()
+   },
 }
+function mergeCrown() {
+   // 将两个网格合并到新的几何体中
+   // 创建一个新的 BufferGeometry 来存储合并后的结果
+   let mergedGeometry = new THREE.BufferGeometry()
+
+   // 将两个网格合并到新的 BufferGeometry 中
+   mergedGeometry.setAttribute(
+      'position',
+      new THREE.BufferAttribute(
+         new Float32Array([
+            ...bridge.geometry.attributes.position.array,
+            ...crownCap.geometry.attributes.position.array,
+         ]),
+         3,
+      ),
+   )
+   // 合并索引数组
+   const indices = new Uint16Array([
+      ...bridge.geometry.index.array,
+      ...crownCap.geometry.index.array.map(
+         (i) => i + bridge.geometry.attributes.position.count,
+      ),
+   ])
+   mergedGeometry.setIndex(new THREE.BufferAttribute(indices, 1))
+
+   mergedGeometry.computeVertexNormals()
+
+   // 创建一个新的网格并将其添加到场景中
+   mergedGeometry = mergeVertices(mergedGeometry)
+   crownTop = new THREE.Mesh(mergedGeometry, material)
+   scene.add(crownTop)
+   crownCap.visible = false
+   bridge.visible = false
+}
+// 合并重合的顶点
+function mergeVertices(geometry, tolerance = 0.00001) {
+   const vertices = geometry.attributes.position.array
+   const indices = geometry.index.array
+
+   const newVertices = []
+   const newIndices = []
+
+   const vertexMap = new Map()
+   const precision = Math.pow(10, Math.round(Math.log10(1 / tolerance)))
+
+   for (let i = 0; i < vertices.length; i += 3) {
+      const x = Math.round(vertices[i] * precision) / precision
+      const y = Math.round(vertices[i + 1] * precision) / precision
+      const z = Math.round(vertices[i + 2] * precision) / precision
+
+      const key = `${x}_${y}_${z}`
+
+      if (!vertexMap.has(key)) {
+         vertexMap.set(key, newVertices.length / 3)
+         newVertices.push(vertices[i], vertices[i + 1], vertices[i + 2])
+      }
+   }
+
+   for (let i = 0; i < indices.length; i++) {
+      const oldIndex = indices[i]
+      const x = Math.round(vertices[oldIndex * 3] * precision) / precision
+      const y = Math.round(vertices[oldIndex * 3 + 1] * precision) / precision
+      const z = Math.round(vertices[oldIndex * 3 + 2] * precision) / precision
+
+      const key = `${x}_${y}_${z}`
+      const newIndex = vertexMap.get(key)
+
+      newIndices.push(newIndex)
+   }
+
+   const newGeometry = new THREE.BufferGeometry()
+   newGeometry.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(newVertices, 3),
+   )
+   newGeometry.setIndex(newIndices)
+   newGeometry.computeVertexNormals() // 重新计算法线
+
+   return newGeometry
+}
+
 function exportModel(object, filename) {
    const exporter = new OBJExporter()
    const objData = exporter.parse(object)
@@ -113,6 +215,7 @@ function match(source, target) {
 
    //generate vertex cloud
    const positions = []
+
    const gap = 0.1
 
    for (const [idx, i] of edgeMapSource.entries()) {
@@ -153,7 +256,7 @@ function match(source, target) {
       let S = new THREE.Vector3().crossVectors(AB, normalSource)
       let CS = new THREE.Vector3().crossVectors(S, AB).normalize()
 
-      let N = normalSource.clone().lerp(CS, t)
+      let N = normalSource.clone().lerp(CS, 0)
       // 计算BC的方向向量，通过AB和N的叉积
       let M = new THREE.Vector3().crossVectors(N, AB)
       let AC_normal = new THREE.Vector3().crossVectors(N, M)
@@ -180,12 +283,18 @@ function match(source, target) {
       const C2 = new THREE.Vector3().addVectors(A, AC)
 
       // 创建样条曲线
-      let curve = new THREE.CatmullRomCurve3([
+      // let curve = new THREE.CatmullRomCurve3([
+      //    vertexSource,
+      //    C1,
+      //    // C2,
+      //    vertexTarget,
+      // ])
+      let curve = new THREE.QuadraticBezierCurve3(
          vertexSource,
          C1,
          // C2,
          vertexTarget,
-      ])
+      )
 
       // 获取曲线上插值点
       let points = curve.getPoints(numPoints)
@@ -197,8 +306,11 @@ function match(source, target) {
 
    const geometry = generateGeometry(positions)
 
-   brigde = new THREE.Mesh(geometry, material)
-   scene.add(brigde)
+   bridge = new THREE.Mesh(geometry, material)
+   scene.add(bridge)
+
+   // normalHelper = createNormalHelper(geometry)
+   // scene.add(normalHelper)
 }
 function generateGeometry(positions) {
    let indexBefore = 0
@@ -233,12 +345,12 @@ function generateGeometry(positions) {
          const v1 = (indexBefore + m) / 3
          const v2 = (startB + closestIndex) / 3
          const v3 = (indexBefore + m + 3) / 3
-         indices.push(v1, v2, v3)
+         indices.push(v3, v2, v1)
          let p = closestIndex
          while (p !== last) {
             const v0 = (startB + p) / 3
             const vt = (startB + p - 3) / 3
-            indices.push(v0, vt, v1)
+            indices.push(v1, v0, vt)
             p -= 3
          }
          last = closestIndex
@@ -249,7 +361,7 @@ function generateGeometry(positions) {
             const v0 = (startB + p) / 3
             const vt = (startB + p + 3) / 3
             const v1 = (indexBefore + lenA - 3) / 3
-            indices.push(v0, vt, v1)
+            indices.push(v1, vt, v0)
             p += 3
          }
       }
@@ -260,11 +372,11 @@ function generateGeometry(positions) {
       'position',
       new THREE.BufferAttribute(new Float32Array(positions.flat()), 3),
    )
+
    // 设置几何体的索引
    geometry.setIndex(indices)
+   geometry.computeVertexNormals()
 
-   // 计算法线
-   // geometry.computeVertexNormals()
    return geometry
 }
 function getK(c, a0) {
@@ -350,7 +462,9 @@ function createGUI() {
    gui.add(params, 'showBase').onChange(() => {
       crownBase.visible = params.showBase
    })
-
+   gui.add(params, 'showNormal').onChange(() => {
+      if (normalHelper) normalHelper.visible = params.showNormal
+   })
    gui.add(params, 'wireframe').onChange(() => {
       if (params.wireframe) {
          material.wireframe = true
@@ -359,7 +473,9 @@ function createGUI() {
       }
    })
    gui.add(params, 'smooth').name('smooth')
+
    gui.add(params, 'export').name('export')
+   gui.add(params, 'merge').name('merge')
 }
 function loadModel() {
    //add stl files

@@ -4,7 +4,6 @@ import * as THREE from 'three'
 // Function to apply Laplace smoothing to a mesh
 export function Smooth(mesh, iterations = 1, lambda = 0.5, vertexIndices) {
    const geometry = mesh.geometry
-   geometry.computeVertexNormals()
 
    const positions = geometry.attributes.position.array
    if (!geometry.edgeMap) {
@@ -55,6 +54,7 @@ export function Smooth(mesh, iterations = 1, lambda = 0.5, vertexIndices) {
          positions[index + 2] = vertex.z
       }
    }
+   geometry.computeVertexNormals()
 
    geometry.attributes.position.needsUpdate = true
 }
