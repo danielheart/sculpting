@@ -56,7 +56,7 @@ const params = {
          // normalHelper.geometry.attributes.normal.needsUpdate = true
          // normalHelper.updateMatrixWorld(true)
       } else {
-         Smooth(crownCap, 10, params.strength / 2)
+         if (!bridge) Smooth(crownCap, 10, params.strength / 2)
       }
    },
    match: () => {
@@ -173,10 +173,10 @@ function match(source, target) {
 
    if (edgeMapSource.length > edgeMapTarget.length) {
       const num = edgeMapSource.length - edgeMapTarget.length
-      edgeMapSource = removeRandomItems(edgeMapSource, num)
+      edgeMapSource = removeUniformly(edgeMapSource, num)
    } else {
       const num = edgeMapTarget.length - edgeMapSource.length
-      edgeMapTarget = removeRandomItems(edgeMapTarget, num)
+      edgeMapTarget = removeUniformly(edgeMapTarget, num)
    }
    console.log(edgeMapSource.length, edgeMapTarget.length)
 
@@ -385,31 +385,30 @@ function getK(c, a0) {
    return (-cMagnitude * cMagnitude) / dotProduct
 }
 
-function removeRandomItems(arr, numToRemove) {
+function removeUniformly(positions, n) {
    // 检查数组长度是否小于要删除的项数
-   if (arr.length < numToRemove) {
-      return arr
+   const length = positions.length
+   if (length < n) {
+      return positions
    }
-   console.log(arr.length)
-   // 创建一个新数组用来存储要删除的索引
-   const indexesToRemove = []
 
-   // 随机选择要删除的 3 个项的索引
-   while (indexesToRemove.length < numToRemove) {
-      const randomIndex = Math.floor(Math.random() * arr.length)
-      if (!indexesToRemove.includes(randomIndex)) {
-         indexesToRemove.push(randomIndex)
+   const stepSize = Math.floor(length / n)
+   const selectedIndices = []
+   const result = []
+
+   // 选择需要保留的点的索引
+   for (let i = 0; i < n; i++) {
+      selectedIndices.push(i * stepSize)
+   }
+
+   // 遍历原始数组,只保留未被选中的点
+   for (let i = 0; i < length; i++) {
+      if (!selectedIndices.includes(i)) {
+         result.push(positions[i])
       }
    }
 
-   // 从后往前删除数组项,保证索引不受影响
-   indexesToRemove
-      .sort((a, b) => b - a)
-      .forEach((index) => {
-         arr.splice(index, 1)
-      })
-   console.log(arr.length)
-   return arr
+   return result
 }
 function createScene() {
    width = window.innerWidth
