@@ -20,6 +20,7 @@ export function Smooth(mesh, iterations = 1, lambda = 0.5, vertexIndices) {
 
    if (!geometry.neighborMap) {
       NeighborMap(geometry)
+      console.log('generate neighborMap')
    }
    const neighborMap = geometry.neighborMap
 

@@ -35,22 +35,29 @@ function init() {
    animate()
 }
 let strength = 0.1
-const smoothIndices = []
-const connectIndices = []
+
 const params = {
    showCrown: true,
    showBase: true,
    wireframe: false,
    strength,
    smooth: () => {
-      if (bridge) {
-         Smooth(bridge, 10, params.strength, smoothIndices)
+      if (crownTop) {
+         const positions = bridge.geometry.attributes.position.array
+         const vertexIndices = []
+
+         for (let i = 0; i < positions.length; i += 3) {
+            vertexIndices.push(i)
+         }
+         // console.log(vertexIndices)
+         Smooth(crownTop, 10, params.strength, vertexIndices)
+         // normalHelper.geometry = createNormalHelper(crownTop.geometry).geometry
+         // normalHelper.geometry.computeVertexNormals()
+         // normalHelper.geometry.attributes.normal.needsUpdate = true
+         // normalHelper.updateMatrixWorld(true)
       } else {
          if (!bridge) Smooth(crownCap, 10, params.strength / 2)
       }
-   },
-   smoothConnect: () => {
-      Smooth(bridge, 10, params.strength, connectIndices)
    },
    match: () => {
       match(crownCap, crownBase)
@@ -166,10 +173,10 @@ function match(source, target) {
 
    if (edgeMapSource.length > edgeMapTarget.length) {
       const num = edgeMapSource.length - edgeMapTarget.length
-      edgeMapTarget = duplicateValues(edgeMapTarget, num)
+      edgeMapSource = removeUniformly(edgeMapSource, num)
    } else {
       const num = edgeMapTarget.length - edgeMapSource.length
-      edgeMapSource = duplicateValues(edgeMapSource, num)
+      edgeMapTarget = removeUniformly(edgeMapTarget, num)
    }
    console.log(edgeMapSource.length, edgeMapTarget.length)
 
@@ -207,12 +214,7 @@ function match(source, target) {
    nearMap.reverse()
 
    //generate vertex cloud
-   const positions = Array.from(positionsSource)
-
-   const indices = Array.from(source.geometry.index.array)
-   // console.log('before:', positions, indices)
-   const indicesBridge = []
-   let lastId = positions.length / 3 - 1
+   const positions = []
 
    const gap = 0.1
 
@@ -296,62 +298,42 @@ function match(source, target) {
 
       // 获取曲线上插值点
       let points = curve.getPoints(numPoints)
-      indicesBridge[idx] = []
-      indicesBridge[idx][0] = i
-      // smoothIndices.push(i * 3)
-      connectIndices.push(i * 3)
-      for (let j = 1; j < points.length; j++) {
-         indicesBridge[idx].push(++lastId)
-         if (j !== points.length - 1) smoothIndices.push(lastId * 3)
-         positions.push(points[j].x, points[j].y, points[j].z)
+      positions[idx] = []
+      for (let j = 0; j < points.length; j++) {
+         positions[idx].push(points[j].x, points[j].y, points[j].z)
       }
    }
-   console.log(smoothIndices, indicesBridge.slice().flat())
-   // console.log('after:', positions, indicesBridge.slice().flat())
-   const geometry = generateGeometry(positions, indicesBridge, indices)
+
+   const geometry = generateGeometry(positions)
 
    bridge = new THREE.Mesh(geometry, material)
    scene.add(bridge)
-   crownCap.visible = false
 
    // normalHelper = createNormalHelper(geometry)
    // scene.add(normalHelper)
 }
-function generateGeometry(positions, indicesBridge, indices) {
-   for (let i = 0; i < indicesBridge.length; i++) {
+function generateGeometry(positions) {
+   let indexBefore = 0
+   const indices = []
+   for (let i = 0; i < positions.length; i++) {
       // if (i === 1) break
-      const indicesA = indicesBridge[i]
-      const indicesB =
-         i === indicesBridge.length - 1
-            ? indicesBridge[0]
-            : indicesBridge[i + 1]
-
+      const posA = positions[i]
+      const posB = i === positions.length - 1 ? positions[0] : positions[i + 1]
       let last = 0
-      const lenA = indicesA.length
-
-      for (let m = 0; m < lenA - 1; m++) {
-         // if (m === lenA - 3) break //only for test
-         const idA = indicesA[m] * 3
-
-         const vertexA = new THREE.Vector3(
-            positions[idA],
-            positions[idA + 1],
-            positions[idA + 2],
-         )
+      const lenA = posA.length
+      const startB = i === positions.length - 1 ? 0 : indexBefore + lenA
+      for (let m = 0; m < lenA; m += 3) {
+         if (m === lenA - 3) break
+         const vertexA = new THREE.Vector3(posA[m], posA[m + 1], posA[m + 2])
          const vertexC = new THREE.Vector3(
-            positions[idA + 3],
-            positions[idA + 4],
-            positions[idA + 5],
+            posA[m + 3],
+            posA[m + 4],
+            posA[m + 5],
          )
          let closestIndex = -1,
             closestDistance = 1000
-         for (let n = 0; n < indicesB.length; n++) {
-            const idB = indicesB[n] * 3
-            const vertexB = new THREE.Vector3(
-               positions[idB],
-               positions[idB + 1],
-               positions[idB + 2],
-            )
+         for (let n = 0; n < posB.length; n += 3) {
+            const vertexB = new THREE.Vector3(posB[n], posB[n + 1], posB[n + 2])
             const distance =
                vertexA.distanceTo(vertexB) + vertexC.distanceTo(vertexB)
             if (distance < closestDistance) {
@@ -360,27 +342,30 @@ function generateGeometry(positions, indicesBridge, indices) {
             }
          }
 
-         const v1 = indicesA[m]
-         const v2 = indicesB[closestIndex]
-         const v3 = indicesA[m + 1]
+         const v1 = (indexBefore + m) / 3
+         const v2 = (startB + closestIndex) / 3
+         const v3 = (indexBefore + m + 3) / 3
          indices.push(v3, v2, v1)
          let p = closestIndex
          while (p !== last) {
-            const v0 = indicesB[p]
-            const vt = indicesB[--p]
+            const v0 = (startB + p) / 3
+            const vt = (startB + p - 3) / 3
             indices.push(v1, v0, vt)
+            p -= 3
          }
          last = closestIndex
       }
-      if (last !== indicesB.length - 1) {
+      if (last !== posB.length - 3) {
          let p = last
-         while (p !== indicesB.length - 1) {
-            const v0 = indicesB[p]
-            const vt = indicesB[++p]
-            const v1 = indicesA[lenA - 1]
+         while (p !== posB.length - 3) {
+            const v0 = (startB + p) / 3
+            const vt = (startB + p + 3) / 3
+            const v1 = (indexBefore + lenA - 3) / 3
             indices.push(v1, vt, v0)
+            p += 3
          }
       }
+      indexBefore += lenA
    }
    const geometry = new THREE.BufferGeometry()
    geometry.setAttribute(
@@ -399,21 +384,7 @@ function getK(c, a0) {
    const dotProduct = a0.dot(c)
    return (-cMagnitude * cMagnitude) / dotProduct
 }
-function duplicateValues(arr, n) {
-   // 计算需要挑选值的索引
-   const step = Math.floor(arr.length / n)
-   const indicesToDuplicate = []
-   for (let i = 0; i < n; i++) {
-      indicesToDuplicate.push(i * step)
-   }
 
-   // 在这些索引处插入新值
-   for (let i = indicesToDuplicate.length - 1; i >= 0; i--) {
-      arr.splice(indicesToDuplicate[i] + 1, 0, arr[indicesToDuplicate[i]])
-   }
-
-   return arr
-}
 function removeUniformly(positions, n) {
    // 检查数组长度是否小于要删除的项数
    const length = positions.length
@@ -501,7 +472,6 @@ function createGUI() {
       }
    })
    gui.add(params, 'smooth').name('smooth')
-   gui.add(params, 'smoothConnect').name('smoothConnect')
 
    gui.add(params, 'export').name('export')
    gui.add(params, 'merge').name('merge')
