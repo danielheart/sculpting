@@ -44,13 +44,18 @@ const params = {
    strength,
    smooth: () => {
       if (bridge) {
-         Smooth(bridge, 10, params.strength, smoothIndices)
+         Smooth(bridge, 20, params.strength, smoothIndices)
       } else {
          if (!bridge) Smooth(crownCap, 10, params.strength / 2)
       }
    },
    smoothConnect: () => {
-      Smooth(bridge, 10, params.strength, connectIndices)
+      Smooth(bridge, 50, params.strength, connectIndices)
+   },
+   smoothTop: () => {
+      if (bridge) {
+         Smooth(bridge, 50, params.strength)
+      }
    },
    match: () => {
       match(crownCap, crownBase)
@@ -502,9 +507,9 @@ function createGUI() {
    })
    gui.add(params, 'smooth').name('smooth')
    gui.add(params, 'smoothConnect').name('smoothConnect')
-
-   gui.add(params, 'export').name('export')
+   gui.add(params, 'smoothTop').name('smoothTop')
    gui.add(params, 'merge').name('merge')
+   gui.add(params, 'export').name('export')
 }
 function loadModel() {
    //add stl files
