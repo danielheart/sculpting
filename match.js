@@ -18,7 +18,7 @@ let scene = new THREE.Scene(),
    bridge,
    normalHelper,
    crownTop
-
+let showCrownControl
 const material = new THREE.MeshPhongMaterial({
    color: 0xece5b8,
    side: THREE.DoubleSide,
@@ -62,9 +62,6 @@ const params = {
    },
    showNormal: true,
    export: () => exportModel(scene, 'scene.obj'),
-   merge: () => {
-      if (bridge) mergeCrown()
-   },
 }
 function mergeCrown() {
    // 将两个网格合并到新的几何体中
@@ -318,7 +315,7 @@ function match(source, target) {
    bridge = new THREE.Mesh(geometry, material)
    scene.add(bridge)
    crownCap.visible = false
-
+   showCrownControl.setValue(false)
    // normalHelper = createNormalHelper(geometry)
    // scene.add(normalHelper)
 }
@@ -489,15 +486,15 @@ function createGUI() {
       strength = params.strength
    })
 
-   gui.add(params, 'showCrown').onChange(() => {
+   showCrownControl = gui.add(params, 'showCrown').onChange(() => {
       crownCap.visible = params.showCrown
    })
    gui.add(params, 'showBase').onChange(() => {
       crownBase.visible = params.showBase
    })
-   gui.add(params, 'showNormal').onChange(() => {
-      if (normalHelper) normalHelper.visible = params.showNormal
-   })
+   // gui.add(params, 'showNormal').onChange(() => {
+   //    if (normalHelper) normalHelper.visible = params.showNormal
+   // })
    gui.add(params, 'wireframe').onChange(() => {
       if (params.wireframe) {
          material.wireframe = true
@@ -508,7 +505,6 @@ function createGUI() {
    gui.add(params, 'smooth').name('smooth')
    gui.add(params, 'smoothConnect').name('smoothConnect')
    gui.add(params, 'smoothTop').name('smoothTop')
-   gui.add(params, 'merge').name('merge')
    gui.add(params, 'export').name('export')
 }
 function loadModel() {
